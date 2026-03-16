@@ -1,10 +1,12 @@
 import AppKit
 import SwiftUI
+import UserNotifications
 
 @MainActor
 final class StandupController: NSObject, ObservableObject {
     static let reminderInterval = 30 * 60
     static let reminderCountdown = 30
+    private static let reminderNotificationID = "standup.reminder"
 
     @Published private(set) var secondsUntilReminder = reminderInterval
     @Published private(set) var countdown = reminderCountdown
@@ -27,10 +29,23 @@ final class StandupController: NSObject, ObservableObject {
     private var awakeSince = Date()
     private var ticker: Timer?
     private var reminderPanel: NSPanel?
+    private let notificationCenter = UNUserNotificationCenter.current()
 
     override init() {
         super.init()
         startTicker()
+    }
+
+    func prepareAlerts() {
+        notificationCenter.delegate = self
+        notificationCenter.requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if let error {
+                NSLog("Standup notification authorization failed: %@", error.localizedDescription)
+                return
+            }
+
+            NSLog("Standup notification authorization granted: %@", granted ? "yes" : "no")
+        }
     }
 
     func resetTimer(reason: String) {
@@ -102,6 +117,8 @@ final class StandupController: NSObject, ObservableObject {
         countdown = Self.reminderCountdown
         isReminderVisible = true
         ensureReminderPanel()
+        playReminderSound()
+        postReminderNotification()
 
         if let panel = reminderPanel {
             panel.center()
@@ -142,7 +159,48 @@ final class StandupController: NSObject, ObservableObject {
         String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 
+    private func playReminderSound() {
+        if let sound = NSSound(named: .init("Glass")) {
+            sound.play()
+            return
+        }
+
+        NSSound.beep()
+    }
+
+    private func postReminderNotification() {
+        let content = UNMutableNotificationContent()
+        content.title = "该站起来活动一下了"
+        content.body = "你已经连续清醒 30 分钟。起来走动 1 到 2 分钟，再回来继续。"
+        content.sound = .default
+
+        notificationCenter.removePendingNotificationRequests(withIdentifiers: [Self.reminderNotificationID])
+        notificationCenter.removeDeliveredNotifications(withIdentifiers: [Self.reminderNotificationID])
+
+        let request = UNNotificationRequest(
+            identifier: Self.reminderNotificationID,
+            content: content,
+            trigger: nil
+        )
+
+        notificationCenter.add(request) { error in
+            if let error {
+                NSLog("Standup notification delivery failed: %@", error.localizedDescription)
+            }
+        }
+    }
+
     private func notifyStateChanged() {
         onStateChange?()
+    }
+}
+
+extension StandupController: UNUserNotificationCenterDelegate {
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .list, .sound])
     }
 }
