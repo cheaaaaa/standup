@@ -5,38 +5,42 @@ import UserNotifications
 @MainActor
 final class StandupController: NSObject, ObservableObject {
     static let reminderInterval = 30 * 60
-    static let reminderCountdown = 30
     private static let reminderNotificationID = "standup.reminder"
 
     @Published private(set) var secondsUntilReminder = reminderInterval
-    @Published private(set) var countdown = reminderCountdown
     @Published private(set) var isReminderVisible = false
 
     var onStateChange: (() -> Void)?
 
     var menuStatusText: String {
         if isReminderVisible {
-            return "站立提醒中，\(countdown) 秒后自动关闭"
+            return "站立提醒等待确认，点击按钮后才会重新计时"
         }
 
         return "距离下次提醒还有 \(formatted(seconds: secondsUntilReminder))"
     }
 
     var statusButtonText: String {
-        isReminderVisible ? " \(countdown)s" : ""
+        isReminderVisible ? " 提醒" : ""
     }
 
     private var awakeSince = Date()
     private var ticker: Timer?
     private var reminderPanel: NSPanel?
-    private let notificationCenter = UNUserNotificationCenter.current()
+    private let notificationCenter: UNUserNotificationCenter?
 
     override init() {
+        notificationCenter = Self.makeNotificationCenterIfAvailable()
         super.init()
         startTicker()
     }
 
     func prepareAlerts() {
+        guard let notificationCenter else {
+            NSLog("Standup notifications are disabled outside a packaged .app bundle")
+            return
+        }
+
         notificationCenter.delegate = self
         notificationCenter.requestAuthorization(options: [.alert, .sound]) { granted, error in
             if let error {
@@ -51,7 +55,6 @@ final class StandupController: NSObject, ObservableObject {
     func resetTimer(reason: String) {
         awakeSince = Date()
         secondsUntilReminder = Self.reminderInterval
-        countdown = Self.reminderCountdown
 
         if isReminderVisible {
             reminderPanel?.orderOut(nil)
@@ -85,16 +88,6 @@ final class StandupController: NSObject, ObservableObject {
 
     private func handleTick() {
         if isReminderVisible {
-            countdown = max(0, countdown - 1)
-
-            if countdown == 0 {
-                reminderPanel?.orderOut(nil)
-                isReminderVisible = false
-                resetTimer(reason: "countdown-finished")
-                return
-            }
-
-            notifyStateChanged()
             return
         }
 
@@ -114,7 +107,6 @@ final class StandupController: NSObject, ObservableObject {
             return
         }
 
-        countdown = Self.reminderCountdown
         isReminderVisible = true
         ensureReminderPanel()
         playReminderSound()
@@ -150,6 +142,7 @@ final class StandupController: NSObject, ObservableObject {
         panel.standardWindowButton(.closeButton)?.isHidden = true
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         panel.standardWindowButton(.zoomButton)?.isHidden = true
+        panel.delegate = self
         panel.contentView = NSHostingView(rootView: ReminderView(controller: self))
 
         reminderPanel = panel
@@ -157,6 +150,14 @@ final class StandupController: NSObject, ObservableObject {
 
     private func formatted(seconds: Int) -> String {
         String(format: "%02d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private static func makeNotificationCenterIfAvailable() -> UNUserNotificationCenter? {
+        guard Bundle.main.bundleURL.pathExtension == "app" else {
+            return nil
+        }
+
+        return UNUserNotificationCenter.current()
     }
 
     private func playReminderSound() {
@@ -169,6 +170,10 @@ final class StandupController: NSObject, ObservableObject {
     }
 
     private func postReminderNotification() {
+        guard let notificationCenter else {
+            return
+        }
+
         let content = UNMutableNotificationContent()
         content.title = "该站起来活动一下了"
         content.body = "你已经连续清醒 30 分钟。起来走动 1 到 2 分钟，再回来继续。"
@@ -202,5 +207,11 @@ extension StandupController: UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         completionHandler([.banner, .list, .sound])
+    }
+}
+
+extension StandupController: NSWindowDelegate {
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        false
     }
 }

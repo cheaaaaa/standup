@@ -13,15 +13,10 @@ struct ReminderView: View {
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 10) {
-                Text("\(controller.countdown) 秒")
-                    .font(.system(size: 46, weight: .bold, design: .rounded))
+                Text("提醒会一直停留，直到你点击下面的按钮。")
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
 
-                ProgressView(
-                    value: Double(StandupController.reminderCountdown - controller.countdown),
-                    total: Double(StandupController.reminderCountdown)
-                )
-
-                Text("倒计时结束后会自动关闭，并重新开始 30 分钟计时。")
+                Text("这样不会因为你刚好没看见窗口，30 秒后就自己消失。")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }
